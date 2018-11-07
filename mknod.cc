@@ -1,33 +1,50 @@
-#include <nan.h>
+#include <napi.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 
-using namespace v8;
+using namespace Napi;
 
-class MknodWorker : public Nan::AsyncWorker {
+class MknodWorker : public Napi::AsyncWorker {
  public:
-  MknodWorker(Nan::Callback *callback, char *path, int mode, int dev)
-    : Nan::AsyncWorker(callback), path(path), mode(mode), dev(dev) {}
+  MknodWorker(Napi::Function& callback, char *path, int mode, int dev)
+    : Napi::AsyncWorker(callback), path(path), mode(mode), dev(dev) {}
   ~MknodWorker() {}
 
   void Execute () {
-    this->error = mknod(path, mode, dev);
+    //this->error = mknod(path, mode, dev);
     free(path);
   }
 
-  void HandleOKCallback () {
-    Nan::HandleScope scope;
+   void OnOK () {
+    Napi::HandleScope scope(Env());
+
     if (this->error) {
-      Local<Value> tmp[] = {
-        Nan::Error("mknod failed")
-      };
-      callback->Call(1, tmp);
+      printf("hello");
+
+      Callback().Call(
+        Receiver().Value(),
+        std::initializer_list<napi_value>{
+          // Napi::Error::New(Env(), "mknod failed")
+          Napi::String::New(Env(), "mknod failed")
+        }
+      );
     } else {
-      callback->Call(0, NULL);
+      Callback().Call(Receiver().Value(), std::initializer_list<napi_value>{});
     }
   }
+
+  // void OnError(const Napi::Error& e)
+  // {
+  //   Callback().MakeCallback(
+  //     Receiver().Value(),
+  //     {
+  //       1,
+  //       e.Value()
+  //     }
+  //   );
+  // }
 
  private:
   char *path;
@@ -36,30 +53,38 @@ class MknodWorker : public Nan::AsyncWorker {
   int error;
 };
 
-NAN_METHOD(Mknod) {
-  Nan::HandleScope scope;
+void Mknod(const Napi::CallbackInfo& info) {
 
-  if (!info[0]->IsString()) return Nan::ThrowError("path must be a string");
-  Nan::Utf8String path(info[0]);
+  //Napi::HandleScope scope;
 
-  if (!info[1]->IsNumber()) return Nan::ThrowError("mode must be a number");
-  int mode = info[1]->Uint32Value();
+  Napi::Env env = info.Env();
 
-  if (!info[2]->IsNumber()) return Nan::ThrowError("dev must be a number");
-  int dev = info[2]->Uint32Value();
+  if (!info[0].IsString()) Napi::Error::New(env, "path must be a string").ThrowAsJavaScriptException();
+  std::string path = info[0].As<Napi::String>().Utf8Value();
 
-  if (!info[3]->IsFunction()) return Nan::ThrowError("callback must be a function");
-  Local<Function> callback = info[3].As<Function>();
+  if (!info[1].IsNumber()) Napi::Error::New(env, "mode must be a number").ThrowAsJavaScriptException();
+  int mode = info[1].As<Napi::Number>().Uint32Value();
+
+  if (!info[2].IsNumber()) Napi::Error::New(env, "dev must be a number").ThrowAsJavaScriptException();
+  int dev = info[2].As<Napi::Number>().Uint32Value();
+
+  if (!info[3].IsFunction()) Napi::Error::New(env, "callback must be a function").ThrowAsJavaScriptException();
+  Napi::Function callback = info[3].As<Napi::Function>();
+
+  printf("hey");
 
   char *path_alloc = (char *) malloc(1024);
-  stpcpy(path_alloc, *path);
+  stpcpy(path_alloc, path.c_str());
 
-  Nan::AsyncQueueWorker(new MknodWorker(new Nan::Callback(callback), path_alloc, mode, dev));
+  printf("plop");
+
+  (new MknodWorker(callback, path_alloc, mode, dev))->Queue();
 }
 
-NAN_MODULE_INIT(InitAll) {
-  Nan::Set(target, Nan::New<String>("mknod").ToLocalChecked(), Nan::GetFunction(Nan::New<FunctionTemplate>(Mknod)).ToLocalChecked());
+Napi::Object InitAll(Napi::Env env, Napi::Object exports) {
+  exports.Set(Napi::String::New(env, "mknod"),
+              Napi::Function::New(env, Mknod));
+  return exports;
 }
 
-NODE_MODULE(mknod, InitAll)
-
+NODE_API_MODULE(mknod, InitAll)
